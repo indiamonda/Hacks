@@ -110,17 +110,20 @@ function hack_school_historyFlood(input) {
 }
 
 function hack_fun_showIframeUrls() {
-  var iframes = document.querySelectorAll('iframe');
-  if (iframes.length === 0) {
-    alert('No iframes found on this page.');
+  if (window._polloraIframeObserver) {
+    window._polloraIframeObserver.disconnect();
+    window._polloraIframeObserver = null;
+    document.querySelectorAll('.pollora-iframe-url-box').forEach(function(el) {
+      el.remove();
+    });
+    alert('Iframe URL watcher stopped.');
     return;
   }
 
-  document.querySelectorAll('.pollora-iframe-url-box').forEach(function(el) {
-    el.remove();
-  });
+  function attachUrlBox(iframe) {
+    if (iframe.dataset.polloraTagged) return;
+    iframe.dataset.polloraTagged = '1';
 
-  iframes.forEach(function(iframe) {
     var url = iframe.src || iframe.getAttribute('src') || '(no src)';
 
     var box = document.createElement('div');
@@ -162,8 +165,40 @@ function hack_fun_showIframeUrls() {
       });
     });
 
-    iframe.parentNode.insertBefore(box, iframe);
+    if (iframe.parentNode) {
+      iframe.parentNode.insertBefore(box, iframe);
+    }
+
+    new MutationObserver(function() {
+      var newUrl = iframe.src || iframe.getAttribute('src') || '(no src)';
+      if (newUrl !== url) {
+        url = newUrl;
+        urlText.textContent = url;
+        urlText.title = url;
+      }
+    }).observe(iframe, { attributes: true, attributeFilter: ['src'] });
+  }
+
+  document.querySelectorAll('iframe').forEach(attachUrlBox);
+
+  var observer = new MutationObserver(function(mutations) {
+    mutations.forEach(function(m) {
+      m.addedNodes.forEach(function(node) {
+        if (node.nodeName === 'IFRAME') {
+          attachUrlBox(node);
+        }
+        if (node.querySelectorAll) {
+          node.querySelectorAll('iframe').forEach(attachUrlBox);
+        }
+      });
+    });
   });
+  observer.observe(document.body, { childList: true, subtree: true });
+  window._polloraIframeObserver = observer;
+
+  var count = document.querySelectorAll('iframe').length;
+  alert('Iframe URL watcher active! Tracking ' + count + ' iframe' +
+    (count === 1 ? '' : 's') + '. New iframes will be tagged automatically.\nRun again to stop.');
 }
 
 function hack_fun_wordCount() {
