@@ -109,6 +109,63 @@ function hack_school_historyFlood(input) {
   alert("History flooding successful! " + url + " now appears " + num + " time" + (num === 1 ? "" : "s") + " in your history.");
 }
 
+function hack_fun_showIframeUrls() {
+  var iframes = document.querySelectorAll('iframe');
+  if (iframes.length === 0) {
+    alert('No iframes found on this page.');
+    return;
+  }
+
+  document.querySelectorAll('.pollora-iframe-url-box').forEach(function(el) {
+    el.remove();
+  });
+
+  iframes.forEach(function(iframe) {
+    var url = iframe.src || iframe.getAttribute('src') || '(no src)';
+
+    var box = document.createElement('div');
+    box.className = 'pollora-iframe-url-box';
+    box.style.cssText =
+      'display:flex;align-items:center;gap:8px;padding:6px 12px;' +
+      'background:#1a1a24;border:1px solid #7c5cfc;border-bottom:none;' +
+      'border-radius:8px 8px 0 0;font-family:monospace;font-size:12px;' +
+      'color:#e8e8f0;cursor:pointer;max-width:100%;box-sizing:border-box;' +
+      'z-index:999999;position:relative;';
+
+    var label = document.createElement('span');
+    label.textContent = 'iframe url: ';
+    label.style.cssText = 'color:#7c5cfc;font-weight:bold;white-space:nowrap;';
+
+    var urlText = document.createElement('span');
+    urlText.textContent = url;
+    urlText.style.cssText =
+      'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;';
+    urlText.title = url;
+
+    var copyHint = document.createElement('span');
+    copyHint.textContent = 'click to copy';
+    copyHint.style.cssText =
+      'color:#8888a0;font-size:10px;white-space:nowrap;font-style:italic;';
+
+    box.appendChild(label);
+    box.appendChild(urlText);
+    box.appendChild(copyHint);
+
+    box.addEventListener('click', function() {
+      navigator.clipboard.writeText(url).then(function() {
+        copyHint.textContent = 'copied!';
+        copyHint.style.color = '#51cf66';
+        setTimeout(function() {
+          copyHint.textContent = 'click to copy';
+          copyHint.style.color = '#8888a0';
+        }, 1500);
+      });
+    });
+
+    iframe.parentNode.insertBefore(box, iframe);
+  });
+}
+
 const HACKS = [
   {
     category: "Quizizz",
@@ -239,6 +296,11 @@ const HACKS = [
         name: "Show Passwords",
         description: "Reveal all password fields on the page",
         func: hack_fun_showPasswords
+      },
+      {
+        name: "Show Iframe URLs",
+        description: "Display the source URL above each iframe with click to copy",
+        func: hack_fun_showIframeUrls
       }
     ]
   },
