@@ -740,6 +740,81 @@ function hack_util_faviconExtractor() {
     });
 }
 
+function hack_util_sourceFileDownload() {
+  if (typeof JSZip === 'undefined') {
+    var s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+    s.onload = doDownload;
+    document.head.appendChild(s);
+  } else {
+    doDownload();
+  }
+
+  function doDownload() {
+    var resources = performance.getEntriesByType('resource');
+    if (resources.length === 0) {
+      alert('No source files found on this page.');
+      return;
+    }
+
+    var host = window.location.hostname.replace(/^www\./, '');
+    var zip = new JSZip();
+    var folder = zip.folder(host);
+    var pending = resources.length;
+    var failed = 0;
+
+    function done() {
+      pending--;
+      if (pending === 0) {
+        if (failed > 0) {
+          alert('Downloaded zip with ' + failed + ' file(s) that failed and were skipped.');
+        } else {
+          alert('Downloaded all ' + resources.length + ' source file(s)!');
+        }
+        zip.generateAsync({ type: 'blob' }).then(function(content) {
+          var url = URL.createObjectURL(content);
+          var a = document.createElement('a');
+          a.href = url;
+          a.download = host + '-sources.zip';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        });
+      }
+    }
+
+    resources.forEach(function(r) {
+      var url = r.name;
+      try {
+        var urlObj = new URL(url);
+        var pathname = urlObj.pathname;
+        if (pathname === '/' || !pathname.includes('.')) { done(); return; }
+        var pathParts = pathname.split('/').filter(function(p) { return p; });
+        var filename = pathParts.pop();
+        var subfolder = pathParts.join('/');
+        var fullPath = subfolder ? (host + '/' + subfolder + '/' + filename) : (host + '/' + filename);
+        fetch(url, { mode: 'cors' })
+          .then(function(res) {
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            return res.blob();
+          })
+          .then(function(blob) {
+            folder.file(fullPath, blob);
+            done();
+          })
+          .catch(function() {
+            failed++;
+            done();
+          });
+      } catch (e) {
+        failed++;
+        done();
+      }
+    });
+  }
+}
+
 function hack_util_cookieViewer() {
   var cookies = document.cookie;
   if (!cookies) { alert('No cookies found for this site.'); return; }
@@ -1095,6 +1170,11 @@ const HACKS = [
         name: "Favicon Extractor",
         description: "Download the site's current favicon as SVG, PNG, or ICO",
         func: hack_util_faviconExtractor
+      },
+      {
+        name: "Source File Download",
+        description: "Download all page source files bundled in a zip with original paths",
+        func: hack_util_sourceFileDownload
       },
       {
         name: "Cookie Viewer",
