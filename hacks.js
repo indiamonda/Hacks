@@ -741,6 +741,10 @@ function hack_util_faviconExtractor() {
 }
 
 function hack_util_sourceFileDownload() {
+  if (window !== window.top) {
+    alert('This tool only works when run on the top-level page, not in an iframe.');
+    return;
+  }
   if (typeof JSZip === 'undefined') {
     var s = document.createElement('script');
     s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
@@ -751,26 +755,90 @@ function hack_util_sourceFileDownload() {
   }
 
   function doDownload() {
-    var resources = performance.getEntriesByType('resource');
-    if (resources.length === 0) {
-      alert('No source files found on this page.');
-      return;
-    }
+    loadPrettier(function() {
+      var resources = performance.getEntriesByType('resource');
+      var host = window.location.hostname.replace(/^www\./, '');
+      var zip = new JSZip();
+      var folder = zip.folder(host);
+      var pending = resources.length + 1;
+      var failed = 0;
 
-    var host = window.location.hostname.replace(/^www\./, '');
-    var zip = new JSZip();
-    var folder = zip.folder(host);
-    var pending = resources.length;
-    var failed = 0;
+      fetch(window.location.href, { mode: 'cors' })
+        .then(function(res) {
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          return res.text();
+        })
+        .then(function(text) {
+          var formatted = prettier.format(text, { parser: 'html', printWidth: 120 });
+          folder.file(host + '/index.html', formatted);
+        })
+        .catch(function() {
+          folder.file(host + '/index.html', '<!DOCTYPE html><html><body>Failed to fetch original HTML</body></html>');
+        })
+        .finally(function() {
+          pending--;
+          if (pending === 0) finish();
+        });
 
-    function done() {
-      pending--;
-      if (pending === 0) {
-        if (failed > 0) {
-          alert('Downloaded zip with ' + failed + ' file(s) that failed and were skipped.');
+      resources.forEach(function(r) {
+        var url = r.name;
+        var ext = getExt(url);
+        if (pathIsText(ext)) {
+          fetch(url, { mode: 'cors' })
+            .then(function(res) {
+              if (!res.ok) throw new Error('HTTP ' + res.status);
+              return res.text();
+            })
+            .then(function(text) {
+              var formatted = prettier.format(text, { parser: getPrettierParser(ext), printWidth: 120 });
+              addFileToZip(url, formatted, host);
+            })
+            .catch(function() {
+              failed++;
+            })
+            .finally(function() {
+              pending--;
+              if (pending === 0) finish();
+            });
         } else {
-          alert('Downloaded all ' + resources.length + ' source file(s)!');
+          fetch(url, { mode: 'cors', responseType: 'blob' })
+            .then(function(res) {
+              if (!res.ok) throw new Error('HTTP ' + res.status);
+              return res.blob();
+            })
+            .then(function(blob) {
+              addFileToZip(url, blob, host);
+            })
+            .catch(function() {
+              failed++;
+            })
+            .finally(function() {
+              pending--;
+              if (pending === 0) finish();
+            });
         }
+      });
+
+      function addFileToZip(url, content, host) {
+        try {
+          var urlObj = new URL(url);
+          var pathname = urlObj.pathname;
+          if (pathname === '/' || !pathname.includes('.')) return;
+          var pathParts = pathname.split('/').filter(function(p) { return p; });
+          var filename = pathParts.pop();
+          var subfolder = pathParts.join('/');
+          var fullPath = subfolder ? (host + '/' + subfolder + '/' + filename) : (host + '/' + filename);
+          folder.file(fullPath, content);
+        } catch (e) {}
+      }
+
+      function finish() {
+        if (failed > 0 && failed === resources.length + 1) {
+          alert('Failed to download any files. This may be due to CORS restrictions.');
+          return;
+        }
+        var msg = failed > 0 ? ('Skipped ' + failed + ' file(s) due to CORS or errors.') : ('All source files formatted and downloaded!');
+        alert(msg);
         zip.generateAsync({ type: 'blob' }).then(function(content) {
           var url = URL.createObjectURL(content);
           var a = document.createElement('a');
@@ -782,36 +850,53 @@ function hack_util_sourceFileDownload() {
           URL.revokeObjectURL(url);
         });
       }
-    }
-
-    resources.forEach(function(r) {
-      var url = r.name;
-      try {
-        var urlObj = new URL(url);
-        var pathname = urlObj.pathname;
-        if (pathname === '/' || !pathname.includes('.')) { done(); return; }
-        var pathParts = pathname.split('/').filter(function(p) { return p; });
-        var filename = pathParts.pop();
-        var subfolder = pathParts.join('/');
-        var fullPath = subfolder ? (host + '/' + subfolder + '/' + filename) : (host + '/' + filename);
-        fetch(url, { mode: 'cors' })
-          .then(function(res) {
-            if (!res.ok) throw new Error('HTTP ' + res.status);
-            return res.blob();
-          })
-          .then(function(blob) {
-            folder.file(fullPath, blob);
-            done();
-          })
-          .catch(function() {
-            failed++;
-            done();
-          });
-      } catch (e) {
-        failed++;
-        done();
-      }
     });
+  }
+
+  function loadPrettier(callback) {
+    if (typeof prettier !== 'undefined') {
+      callback();
+      return;
+    }
+    var s = document.createElement('script');
+    s.src = 'https://unpkg.com/prettier@3.4.2/standalone.min.js';
+    s.onload = function() {
+      var m = document.createElement('script');
+      m.src = 'https://unpkg.com/prettier@3.4.2/parser-html.min.js';
+      m.onload = function() {
+        var cs = document.createElement('script');
+        cs.src = 'https://unpkg.com/prettier@3.4.2/parser-css.min.js';
+        cs.onload = function() {
+          var js = document.createElement('script');
+          js.src = 'https://unpkg.com/prettier@3.4.2/parser-babel.min.js';
+          js.onload = callback;
+          document.head.appendChild(js);
+        };
+        document.head.appendChild(cs);
+      };
+      document.head.appendChild(m);
+    };
+    document.head.appendChild(s);
+  }
+
+  function getExt(url) {
+    var parts = url.split('?')[0].split('.');
+    return parts.length > 1 ? parts.pop().toLowerCase() : '';
+  }
+
+  function pathIsText(ext) {
+    return ['js', 'jsx', 'ts', 'tsx', 'css', 'scss', 'less', 'html', 'htm', 'json', 'xml', 'svg', 'md', 'txt'].indexOf(ext) !== -1;
+  }
+
+  function getPrettierParser(ext) {
+    if (['js', 'jsx', 'mjs'].indexOf(ext) !== -1) return 'babel';
+    if (['ts', 'tsx', 'mts'].indexOf(ext) !== -1) return 'typescript';
+    if (['css', 'scss', 'less'].indexOf(ext) !== -1) return 'css';
+    if (['html', 'htm'].indexOf(ext) !== -1) return 'html';
+    if (ext === 'json') return 'json';
+    if (ext === 'xml') return 'xml';
+    if (ext === 'svg') return 'html';
+    return 'babel';
   }
 }
 
@@ -1173,7 +1258,7 @@ const HACKS = [
       },
       {
         name: "Source File Download",
-        description: "Download all page source files bundled in a zip with original paths",
+        description: "Download and format all page source files (JS/CSS/HTML) with Prettier into a zip",
         func: hack_util_sourceFileDownload
       },
       {
