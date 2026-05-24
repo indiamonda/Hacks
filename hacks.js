@@ -748,114 +748,15 @@ function hack_util_sourceFileDownload() {
   if (typeof JSZip === 'undefined') {
     var s = document.createElement('script');
     s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
-    s.onload = doDownload;
+    s.onload = function() { loadPrettier(); };
     document.head.appendChild(s);
   } else {
-    doDownload();
+    loadPrettier();
   }
 
-  function doDownload() {
-    loadPrettier(function() {
-      var resources = performance.getEntriesByType('resource');
-      var host = window.location.hostname.replace(/^www\./, '');
-      var zip = new JSZip();
-      var folder = zip.folder(host);
-      var pending = resources.length + 1;
-      var failed = 0;
-
-      fetch(window.location.href, { mode: 'cors' })
-        .then(function(res) {
-          if (!res.ok) throw new Error('HTTP ' + res.status);
-          return res.text();
-        })
-        .then(function(text) {
-          var formatted = prettier.format(text, { parser: 'html', printWidth: 120 });
-          folder.file(host + '/index.html', formatted);
-        })
-        .catch(function() {
-          folder.file(host + '/index.html', '<!DOCTYPE html><html><body>Failed to fetch original HTML</body></html>');
-        })
-        .finally(function() {
-          pending--;
-          if (pending === 0) finish();
-        });
-
-      resources.forEach(function(r) {
-        var url = r.name;
-        var ext = getExt(url);
-        if (pathIsText(ext)) {
-          fetch(url, { mode: 'cors' })
-            .then(function(res) {
-              if (!res.ok) throw new Error('HTTP ' + res.status);
-              return res.text();
-            })
-            .then(function(text) {
-              var formatted = prettier.format(text, { parser: getPrettierParser(ext), printWidth: 120 });
-              addFileToZip(url, formatted, host);
-            })
-            .catch(function() {
-              failed++;
-            })
-            .finally(function() {
-              pending--;
-              if (pending === 0) finish();
-            });
-        } else {
-          fetch(url, { mode: 'cors', responseType: 'blob' })
-            .then(function(res) {
-              if (!res.ok) throw new Error('HTTP ' + res.status);
-              return res.blob();
-            })
-            .then(function(blob) {
-              addFileToZip(url, blob, host);
-            })
-            .catch(function() {
-              failed++;
-            })
-            .finally(function() {
-              pending--;
-              if (pending === 0) finish();
-            });
-        }
-      });
-
-      function addFileToZip(url, content, host) {
-        try {
-          var urlObj = new URL(url);
-          var pathname = urlObj.pathname;
-          if (pathname === '/' || !pathname.includes('.')) return;
-          var pathParts = pathname.split('/').filter(function(p) { return p; });
-          var filename = pathParts.pop();
-          var subfolder = pathParts.join('/');
-          var fullPath = subfolder ? (host + '/' + subfolder + '/' + filename) : (host + '/' + filename);
-          folder.file(fullPath, content);
-        } catch (e) {}
-      }
-
-      function finish() {
-        if (failed > 0 && failed === resources.length + 1) {
-          alert('Failed to download any files. This may be due to CORS restrictions.');
-          return;
-        }
-        var msg = failed > 0 ? ('Skipped ' + failed + ' file(s) due to CORS or errors.') : ('All source files formatted and downloaded!');
-        alert(msg);
-        zip.generateAsync({ type: 'blob' }).then(function(content) {
-          var url = URL.createObjectURL(content);
-          var a = document.createElement('a');
-          a.href = url;
-          a.download = host + '-sources.zip';
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-          URL.revokeObjectURL(url);
-        });
-      }
-    });
-  }
-
-  function loadPrettier(callback) {
+  function loadPrettier() {
     if (typeof prettier !== 'undefined') {
-      callback();
+      doDownload();
       return;
     }
     var s = document.createElement('script');
@@ -869,7 +770,12 @@ function hack_util_sourceFileDownload() {
         cs.onload = function() {
           var js = document.createElement('script');
           js.src = 'https://unpkg.com/prettier@3.4.2/parser-babel.min.js';
-          js.onload = callback;
+          js.onload = function() {
+            var ts = document.createElement('script');
+            ts.src = 'https://unpkg.com/prettier@3.4.2/parser-typescript.min.js';
+            ts.onload = function() { doDownload(); };
+            document.head.appendChild(ts);
+          };
           document.head.appendChild(js);
         };
         document.head.appendChild(cs);
@@ -885,7 +791,7 @@ function hack_util_sourceFileDownload() {
   }
 
   function pathIsText(ext) {
-    return ['js', 'jsx', 'ts', 'tsx', 'css', 'scss', 'less', 'html', 'htm', 'json', 'xml', 'svg', 'md', 'txt'].indexOf(ext) !== -1;
+    return ['js', 'jsx', 'mjs', 'ts', 'tsx', 'mts', 'css', 'scss', 'less', 'html', 'htm', 'json', 'xml', 'svg', 'md', 'txt'].indexOf(ext) !== -1;
   }
 
   function getPrettierParser(ext) {
@@ -897,6 +803,123 @@ function hack_util_sourceFileDownload() {
     if (ext === 'xml') return 'xml';
     if (ext === 'svg') return 'html';
     return 'babel';
+  }
+
+  function doDownload() {
+    var resources = performance.getEntriesByType('resource');
+    if (resources.length === 0) {
+      alert('No source files detected on this page. Try refreshing and running this tool quickly.');
+      return;
+    }
+    var host = window.location.hostname.replace(/^www\./, '');
+    var zip = new JSZip();
+    var folder = zip.folder(host);
+    var total = resources.length + 1;
+    var pending = total;
+    var failed = 0;
+    var done = false;
+
+    function finish() {
+      if (done) return;
+      if (pending > 0) return;
+      done = true;
+      if (failed > 0 && failed === total) {
+        alert('Failed to download any files. This may be due to CORS restrictions.');
+        return;
+      }
+      var msg = failed > 0 ? ('Skipped ' + failed + ' file(s) due to CORS or errors.') : ('All source files formatted and downloaded!');
+      alert(msg);
+      zip.generateAsync({ type: 'blob' }).then(function(content) {
+        var url = URL.createObjectURL(content);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = host + '-sources.zip';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }).catch(function(err) {
+        alert('Zip generation failed: ' + err.message);
+      });
+    }
+
+    fetch(window.location.href, { mode: 'cors' })
+      .then(function(res) {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res.text();
+      })
+      .then(function(text) {
+        var formatted = prettier.format(text, { parser: 'html', printWidth: 120 });
+        folder.file(host + '/index.html', formatted);
+      })
+      .catch(function() {
+        failed++;
+      })
+      .finally(function() {
+        pending--;
+        finish();
+      });
+
+    resources.forEach(function(r) {
+      var url = r.name;
+      var ext = getExt(url);
+      if (!pathIsText(ext)) {
+        // Binary — fetch as blob
+        fetch(url, { mode: 'cors' })
+          .then(function(res) {
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            return res.blob();
+          })
+          .then(function(blob) {
+            addFileToZip(url, blob, host, ext);
+          })
+          .catch(function() {
+            failed++;
+          })
+          .finally(function() {
+            pending--;
+            finish();
+          });
+      } else {
+        // Text — format with Prettier
+        fetch(url, { mode: 'cors' })
+          .then(function(res) {
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            return res.text();
+          })
+          .then(function(text) {
+            var parser = getPrettierParser(ext);
+            var formatted;
+            try {
+              formatted = prettier.format(text, { parser: parser, printWidth: 120 });
+            } catch (e) {
+              // If Prettier fails, use raw text
+              formatted = text;
+            }
+            addFileToZip(url, formatted, host, ext);
+          })
+          .catch(function() {
+            failed++;
+          })
+          .finally(function() {
+            pending--;
+            finish();
+          });
+      }
+    });
+
+    function addFileToZip(url, content, host, ext) {
+      try {
+        var urlObj = new URL(url);
+        var pathname = urlObj.pathname;
+        if (pathname === '/' || !pathname.includes('.')) return;
+        var pathParts = pathname.split('/').filter(function(p) { return p; });
+        var filename = pathParts.pop();
+        var subfolder = pathParts.join('/');
+        var fullPath = subfolder ? (host + '/' + subfolder + '/' + filename) : (host + '/' + filename);
+        folder.file(fullPath, content);
+      } catch (e) {}
+    }
   }
 }
 
