@@ -811,7 +811,7 @@ function hack_util_sourceFileDownload() {
           alert('Failed to download any files. This may be due to CORS restrictions on this site.');
           return;
         }
-        var msg = failed.length > 0 ? ('Downloaded ' + successes + ' file(s). Skipped ' + failed.length + ' due to errors.') : ('All ' + successes + ' source file(s) downloaded!');
+        var msg = failed.length > 0 ? ('Skipped ' + failed.length + ' file(s) due to errors.') : '';
         alert(msg);
         zip.generateAsync({ type: 'blob' }).then(function(content) {
           var url = URL.createObjectURL(content);
