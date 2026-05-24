@@ -545,21 +545,61 @@ function hack_games_extractGameUrl() {
 
 function hack_games_removeAds() {
   var removed = 0;
-  var adSelectors = [
-    'iframe[src*="ads"]', 'iframe[src*="doubleclick"]', 'iframe[src*="googlesyndication"]',
-    'iframe[src*="adserver"]', 'iframe[src*="banner"]',
-    '[class*="ad-"]', '[class*="ad_"]', '[class*="ads-"]', '[class*="ads_"]',
-    '[class*="adsbygoogle"]', '[id*="ad-"]', '[id*="ad_"]',
-    '[class*="sponsor"]', '[class*="banner"]',
-    'ins.adsbygoogle', '.ad-container', '.ad-wrapper', '#ad-container',
-    '[data-ad]', '[data-ads]'
-  ];
-  adSelectors.forEach(function(sel) {
-    document.querySelectorAll(sel).forEach(function(el) {
-      el.remove();
-      removed++;
-    });
+
+  // Remove ad iframes
+  document.querySelectorAll('iframe[src*="ads"], iframe[src*="doubleclick"], iframe[src*="googlesyndication"], iframe[src*="adserver"], iframe[src*="banner"], iframe[src*="adsystem"], iframe[src*="adnxs"], iframe[src*="adservice"], iframe[src*="advertising"], iframe[src*="pubmatic"], iframe[src*="rubicon"], iframe[src*="openx"], iframe[src*="taboola"], iframe[src*="outbrain"], iframe[src*="criteo"]').forEach(function(el) {
+    el.remove();
+    removed++;
   });
+
+  // Remove elements with ad-related classes/ids
+  var adSelectors = [
+    '[class*="ad-"]', '[class*="ad_"]', '[class*="ads-"]', '[class*="ads_"]', '[class*="adsbygoogle"]',
+    '[id*="ad-"]', '[id*="ad_"]', '[class*="sponsor"]', '[class*="banner"]', '[class*="advertisement"]',
+    '[class*="ad-container"]', '[class*="ad-wrapper"]', '[class*="adbox"]', '[class*="ad-unit"]',
+    '[id*="google_ads"]', '[id*="ad-container"]', '[data-ad]', '[data-ads]', '[data-advertisement]',
+    '.ad', '.ads', '.advert', '.sponsored', '.promo', '.promotion',
+    'ins.adsbygoogle', '.google-ad', '.dfp-ad', '.ad-slot', '.ad-sponsorship',
+    '[class*="sov"]', '[class*="mgid"]', '[class*="taboola"]', '[class*="outbrain"]'
+  ];
+
+  adSelectors.forEach(function(sel) {
+    try {
+      document.querySelectorAll(sel).forEach(function(el) {
+        if (el.tagName !== 'IFRAME' || !el.src || !el.src.match(/ads|doubleclick|googlesyndication|adserver|banner|adsystem|adnxs|adservice|advertising|pubmatic|rubicon|openx|taboola|outbrain|criteo/i)) {
+          el.remove();
+          removed++;
+        }
+      });
+    } catch (e) {}
+  });
+
+  // Hide fixed/sticky overlays commonly used for ad walls
+  document.querySelectorAll('*').forEach(function(el) {
+    try {
+      var style = window.getComputedStyle(el);
+      if ((style.position === 'fixed' || style.position === 'sticky') && style.zIndex > 1000) {
+        var tag = el.tagName;
+        if (tag !== 'HEADER' && tag !== 'NAV' && tag !== 'MAIN' && tag !== 'FOOTER') {
+          var text = (el.textContent || '').toLowerCase();
+          if (text.match(/subscribe|sign up|login|register|password|ad|advertisement|sponsor/i)) {
+            el.remove();
+            removed++;
+          }
+        }
+      }
+    } catch (e) {}
+  });
+
+  // Kill known ad networks' iframes by domain
+  document.querySelectorAll('iframe').forEach(function(f) {
+    var src = f.src || '';
+    if (src.match(/googlesyndication|doubleclick|googlesyndication|adservice|googleads|adnxs|rubiconproject|pubmatic|openx|criteo|taboola|outbrain|mgid|revcontent|zergnet|popads/i)) {
+      f.remove();
+      removed++;
+    }
+  });
+
   alert('Removed ' + removed + ' ad element(s).');
 }
 
