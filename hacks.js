@@ -788,178 +788,249 @@ function hack_util_sourceFileDownload() {
   if (typeof JSZip === 'undefined') {
     var s = document.createElement('script');
     s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
-    s.onload = function() { loadPrettier(); };
+    s.onload = doDownload;
     document.head.appendChild(s);
   } else {
-    loadPrettier();
-  }
-
-  function loadPrettier() {
-    if (typeof prettier !== 'undefined') {
-      doDownload();
-      return;
-    }
-    var s = document.createElement('script');
-    s.src = 'https://unpkg.com/prettier@3.4.2/standalone.min.js';
-    s.onload = function() {
-      var m = document.createElement('script');
-      m.src = 'https://unpkg.com/prettier@3.4.2/parser-html.min.js';
-      m.onload = function() {
-        var cs = document.createElement('script');
-        cs.src = 'https://unpkg.com/prettier@3.4.2/parser-css.min.js';
-        cs.onload = function() {
-          var js = document.createElement('script');
-          js.src = 'https://unpkg.com/prettier@3.4.2/parser-babel.min.js';
-          js.onload = function() {
-            var ts = document.createElement('script');
-            ts.src = 'https://unpkg.com/prettier@3.4.2/parser-typescript.min.js';
-            ts.onload = function() { doDownload(); };
-            document.head.appendChild(ts);
-          };
-          document.head.appendChild(js);
-        };
-        document.head.appendChild(cs);
-      };
-      document.head.appendChild(m);
-    };
-    document.head.appendChild(s);
-  }
-
-  function getExt(url) {
-    var parts = url.split('?')[0].split('.');
-    return parts.length > 1 ? parts.pop().toLowerCase() : '';
-  }
-
-  function pathIsText(ext) {
-    return ['js', 'jsx', 'mjs', 'ts', 'tsx', 'mts', 'css', 'scss', 'less', 'html', 'htm', 'json', 'xml', 'svg', 'md', 'txt'].indexOf(ext) !== -1;
-  }
-
-  function getPrettierParser(ext) {
-    if (['js', 'jsx', 'mjs'].indexOf(ext) !== -1) return 'babel';
-    if (['ts', 'tsx', 'mts'].indexOf(ext) !== -1) return 'typescript';
-    if (['css', 'scss', 'less'].indexOf(ext) !== -1) return 'css';
-    if (['html', 'htm'].indexOf(ext) !== -1) return 'html';
-    if (ext === 'json') return 'json';
-    if (ext === 'xml') return 'xml';
-    if (ext === 'svg') return 'html';
-    return 'babel';
+    doDownload();
   }
 
   function doDownload() {
-    var resources = performance.getEntriesByType('resource');
-    if (resources.length === 0) {
-      alert('No source files detected on this page. Try refreshing and running this tool quickly.');
-      return;
-    }
     var host = window.location.hostname.replace(/^www\./, '');
+    var origin = window.location.origin;
     var zip = new JSZip();
     var folder = zip.folder(host);
-    var total = resources.length + 1;
-    var pending = total;
-    var failed = 0;
-    var done = false;
+    var pending = 0;
+    var successes = 0;
+    var failed = [];
+    var seenUrls = {};
+    var textExtensions = ['js', 'jsx', 'mjs', 'ts', 'tsx', 'mts', 'css', 'scss', 'less', 'html', 'htm', 'json', 'xml', 'svg', 'md', 'txt', 'php', 'py', 'rb', 'java', 'c', 'cpp', 'h', 'hpp', 'go', 'rs', 'sh', 'bash', 'zsh'];
 
-    function finish() {
-      if (done) return;
-      if (pending > 0) return;
-      done = true;
-      if (failed > 0 && failed === total) {
-        alert('Failed to download any files. This may be due to CORS restrictions.');
-        return;
+    function finishIfDone() {
+      if (successes + failed.length >= pending) {
+        if (successes === 0) {
+          alert('Failed to download any files. This may be due to CORS restrictions on this site.');
+          return;
+        }
+        var msg = failed.length > 0 ? ('Downloaded ' + successes + ' file(s). Skipped ' + failed.length + ' due to errors.') : ('All ' + successes + ' source file(s) downloaded!');
+        alert(msg);
+        zip.generateAsync({ type: 'blob' }).then(function(content) {
+          var url = URL.createObjectURL(content);
+          var a = document.createElement('a');
+          a.href = url;
+          a.download = host + '-sources.zip';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        }).catch(function(err) {
+          alert('Zip generation failed: ' + err.message);
+        });
       }
-      var msg = failed > 0 ? ('Skipped ' + failed + ' file(s) due to CORS or errors.') : ('All source files formatted and downloaded!');
-      alert(msg);
-      zip.generateAsync({ type: 'blob' }).then(function(content) {
-        var url = URL.createObjectURL(content);
-        var a = document.createElement('a');
-        a.href = url;
-        a.download = host + '-sources.zip';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      }).catch(function(err) {
-        alert('Zip generation failed: ' + err.message);
-      });
     }
 
+    function queueDownload(url, originalContent, rewriteCallback) {
+      if (seenUrls[url]) return;
+      seenUrls[url] = true;
+      pending++;
+
+      fetch(url, { mode: 'cors' })
+        .then(function(res) {
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          var contentType = res.headers.get('content-type') || '';
+          var ext = url.split('?')[0].split('.').pop().split('/').pop().toLowerCase();
+          if (textExtensions.indexOf(ext) !== -1 || contentType.indexOf('text') !== -1 || contentType.indexOf('json') !== -1 || contentType.indexOf('xml') !== -1) {
+            return res.text().then(function(text) {
+              if (rewriteCallback) text = rewriteCallback(text);
+              return { text: text, isText: true, ext: ext };
+            });
+          } else {
+            return res.blob().then(function(blob) {
+              return { blob: blob, isText: false };
+            });
+          }
+        })
+        .then(function(data) {
+          var pathname = new URL(url).pathname;
+          var pathParts = pathname.split('/').filter(function(p) { return p; });
+          var filename = pathParts.pop();
+          var subfolder = pathParts.join('/');
+          var fullPath = subfolder ? (host + '/' + subfolder + '/' + filename) : (host + '/' + filename);
+
+          if (data.isText) {
+            folder.file(fullPath, data.text);
+          } else {
+            folder.file(fullPath, data.blob);
+          }
+          successes++;
+
+          if (data.isText && (data.ext === 'js' || data.ext === 'jsx' || data.ext === 'mjs' || data.ext === 'ts' || data.ext === 'tsx')) {
+            var foundLinks = extractLinksFromJS(data.text, url);
+            foundLinks.forEach(function(link) {
+              var absUrl = resolveUrl(link, url);
+              if (absUrl && isSameDomain(absUrl)) {
+                queueDownload(absUrl, null, makeRelativeRewriter(absUrl, link, filename, subfolder, host));
+              }
+            });
+          }
+        })
+        .catch(function(e) {
+          failed.push(url.split('/').pop());
+        })
+        .then(function() {
+          pending--;
+          finishIfDone();
+        });
+    }
+
+    function makeRelativeRewriter(fileUrl, originalLink, filename, subfolder, host) {
+      return function(text) {
+        var fileBase = filename.replace(/\.[^.]+$/, '');
+        var newName = fileBase + '.js';
+        var newPath = subfolder ? (subfolder + '/' + newName) : newName;
+        var regex = new RegExp('([\'"`])\\/?' + originalLink.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '([\'"`)])', 'g');
+        return text.replace(regex, '$1' + newPath + '$2');
+      };
+    }
+
+    function resolveUrl(link, baseUrl) {
+      if (!link || link.startsWith('data:') || link.startsWith('blob:') || link.startsWith('javascript:') || link.startsWith('mailto:') || link.startsWith('#') || link.startsWith('?')) return null;
+      try {
+        return new URL(link, baseUrl).href;
+      } catch (e) {
+        return null;
+      }
+    }
+
+    function isSameDomain(url) {
+      try {
+        var urlObj = new URL(url);
+        return urlObj.hostname === window.location.hostname || urlObj.hostname === 'www.' + window.location.hostname || 'www.' + urlObj.hostname === window.location.hostname;
+      } catch (e) {
+        return false;
+      }
+    }
+
+    function extractLinksFromJS(text, baseUrl) {
+      var links = [];
+      // import/require/require.resolve
+      var importRegex = /(?:import\s+(?:[\w*{}\s,]+\s+from\s+|[\w{*}\s(]+ from\s+)?|require\s*\(|require\.resolve\s*\()[\s]*['"]([^'"]+)['"]/g;
+      var m;
+      while ((m = importRegex.exec(text)) !== null) {
+        links.push(m[1]);
+      }
+      // dynamic import()
+      var dynImport = /import\s*\(['"]([^'"]+)['"]\)/g;
+      while ((m = dynImport.exec(text)) !== null) {
+        links.push(m[1]);
+      }
+      // fetch/XHR/axios/ajax links
+      var fetchLinks = /(?:fetch|axios|axios\.(?:get|post)|XMLHttpRequest)\s*\(["']([^"']+)["']|src\s*:\s*["']([^"']+)["']|href\s*:\s*["']([^"']+)["']|url\s*\(["']([^"']+)["']/g;
+      while ((m = fetchLinks.exec(text)) !== null) {
+        for (var i = 1; i < m.length; i++) {
+          if (m[i] && !m[i].startsWith('data:') && !m[i].startsWith('blob:') && (m[i].startsWith('/') || m[i].match(/\.[a-z]+(\?|$)/i))) {
+            links.push(m[i]);
+          }
+        }
+      }
+      // CSS @import and url()
+      var cssLinks = /@import\s+['"]([^'"]+)['"]|url\s*\(['"]([^'"]+)['"]\)/g;
+      while ((m = cssLinks.exec(text)) !== null) {
+        for (var i = 1; i < m.length; i++) {
+          if (m[i]) links.push(m[i]);
+        }
+      }
+      return links;
+    }
+
+    // Start with current page HTML
+    pending++;
     fetch(window.location.href, { mode: 'cors' })
       .then(function(res) {
         if (!res.ok) throw new Error('HTTP ' + res.status);
         return res.text();
       })
-      .then(function(text) {
-        var formatted = prettier.format(text, { parser: 'html', printWidth: 120 });
-        folder.file(host + '/index.html', formatted);
-      })
-      .catch(function() {
-        failed++;
-      })
-      .finally(function() {
-        pending--;
-        finish();
-      });
+      .then(function(html) {
+        // Save the HTML file
+        var pathname = window.location.pathname;
+        var htmlFilename = pathname === '/' || pathname === '' ? 'index.html' : pathname.split('/').pop();
+        folder.file(host + '/' + htmlFilename, html);
+        successes++;
 
-    resources.forEach(function(r) {
-      var url = r.name;
-      var ext = getExt(url);
-      if (!pathIsText(ext)) {
-        // Binary — fetch as blob
-        fetch(url, { mode: 'cors' })
-          .then(function(res) {
-            if (!res.ok) throw new Error('HTTP ' + res.status);
-            return res.blob();
-          })
-          .then(function(blob) {
-            addFileToZip(url, blob, host, ext);
-          })
-          .catch(function() {
-            failed++;
-          })
-          .finally(function() {
-            pending--;
-            finish();
-          });
-      } else {
-        // Text — format with Prettier
-        fetch(url, { mode: 'cors' })
-          .then(function(res) {
-            if (!res.ok) throw new Error('HTTP ' + res.status);
-            return res.text();
-          })
-          .then(function(text) {
-            var parser = getPrettierParser(ext);
-            var formatted;
-            try {
-              formatted = prettier.format(text, { parser: parser, printWidth: 120 });
-            } catch (e) {
-              // If Prettier fails, use raw text
-              formatted = text;
+        // Extract and queue all linked resources from HTML
+        var foundUrls = [];
+
+        // Parse HTML tags for linked resources
+        var tagsToCheck = [
+          { tag: 'script', attr: 'src' },
+          { tag: 'link', attr: 'href' },
+          { tag: 'img', attr: 'src' },
+          { tag: 'source', attr: 'src' },
+          { tag: 'video', attr: 'src' },
+          { tag: 'audio', attr: 'src' },
+          { tag: 'embed', attr: 'src' },
+          { tag: 'object', attr: 'data' },
+          { tag: 'iframe', attr: 'src' },
+          { tag: 'img', attr: 'srcset' },
+          { tag: 'link', attr: 'href', extra: function(el) { return el.rel && el.rel === 'stylesheet' ? [el.href] : []; } }
+        ];
+
+        var tempDiv = document.createElement('div');
+        tempDiv.innerHTML = html;
+        tagsToCheck.forEach(function(info) {
+          var els = tempDiv.querySelectorAll(info.tag);
+          els.forEach(function(el) {
+            var val = el.getAttribute(info.attr);
+            if (val) foundUrls.push(val);
+            if (info.extra) {
+              var extra = info.extra(el);
+              extra.forEach(function(v) { foundUrls.push(v); });
             }
-            addFileToZip(url, formatted, host, ext);
-          })
-          .catch(function() {
-            failed++;
-          })
-          .finally(function() {
-            pending--;
-            finish();
           });
-      }
-    });
+        });
 
-    function addFileToZip(url, content, host, ext) {
-      try {
-        var urlObj = new URL(url);
-        var pathname = urlObj.pathname;
-        if (pathname === '/' || !pathname.includes('.')) return;
-        var pathParts = pathname.split('/').filter(function(p) { return p; });
-        var filename = pathParts.pop();
-        var subfolder = pathParts.join('/');
-        var fullPath = subfolder ? (host + '/' + subfolder + '/' + filename) : (host + '/' + filename);
-        folder.file(fullPath, content);
-      } catch (e) {}
-    }
+        // Inline scripts - find linked scripts that are external
+        var inlineScriptMatches = html.match(/<script[^>]+src=["']([^"']+)["']/g) || [];
+        inlineScriptMatches.forEach(function(match) {
+          var src = match.match(/src=["']([^"']+)["']/);
+          if (src) foundUrls.push(src[1]);
+        });
+
+        // Inline styles with href links
+        var inlineStyleMatches = html.match(/<link[^>]+href=["']([^"']+)["'][^>]*>/g) || [];
+        inlineStyleMatches.forEach(function(match) {
+          var href = match.match(/href=["']([^"']+)["']/);
+          if (href) foundUrls.push(href[1]);
+        });
+
+        foundUrls.forEach(function(url) {
+          var absUrl = resolveUrl(url, window.location.href);
+          if (absUrl && isSameDomain(absUrl)) {
+            queueDownload(absUrl, null, null);
+          }
+        });
+
+        // Also scan inline JS for linked files
+        var scriptBlocks = html.match(/<script[^>]*>([\s\S]*?)<\/script>/g) || [];
+        scriptBlocks.forEach(function(block) {
+          var content = block.match(/<script[^>]*>([\s\S]*?)<\/script>/);
+          if (content && content[1]) {
+            var foundLinks = extractLinksFromJS(content[1], window.location.href);
+            foundLinks.forEach(function(link) {
+              var absUrl = resolveUrl(link, window.location.href);
+              if (absUrl && isSameDomain(absUrl)) {
+                queueDownload(absUrl, null, null);
+              }
+            });
+          }
+        });
+      })
+      .catch(function(e) {
+        failed.push('index.html');
+      })
+      .then(function() {
+        pending--;
+        finishIfDone();
+      });
   }
 }
 
@@ -1321,7 +1392,7 @@ const HACKS = [
       },
       {
         name: "Source File Download",
-        description: "Download and format all page source files (JS/CSS/HTML) with Prettier into a zip",
+        description: "Download all page source files bundled in a zip with original paths",
         func: hack_util_sourceFileDownload
       },
       {
