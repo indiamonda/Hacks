@@ -708,6 +708,38 @@ function hack_util_listResources() {
   });
 }
 
+function hack_util_faviconExtractor() {
+  var faviconEl = document.querySelector("link[rel*='icon']") || document.querySelector("link[rel='shortcut icon']");
+  var faviconHref = faviconEl ? faviconEl.href : '/favicon.ico';
+  var origin = window.location.origin;
+  if (faviconHref.startsWith('/')) {
+    faviconHref = origin + faviconHref;
+  }
+  fetch(faviconHref)
+    .then(function(res) {
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return res.blob();
+    })
+    .then(function(blob) {
+      var contentType = blob.type;
+      var ext = 'ico';
+      if (contentType === 'image/svg+xml') ext = 'svg';
+      else if (contentType === 'image/png') ext = 'png';
+      else if (contentType === 'image/x-icon' || contentType === 'image/vnd.microsoft.icon') ext = 'ico';
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = 'favicon.' + ext;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    })
+    .catch(function(err) {
+      alert('Failed to download favicon: ' + err.message);
+    });
+}
+
 function hack_util_cookieViewer() {
   var cookies = document.cookie;
   if (!cookies) { alert('No cookies found for this site.'); return; }
@@ -1058,6 +1090,11 @@ const HACKS = [
         name: "List All Resources",
         description: "Dump all loaded JS, CSS, image, font, and media URLs",
         func: hack_util_listResources
+      },
+      {
+        name: "Favicon Extractor",
+        description: "Download the site's current favicon as SVG, PNG, or ICO",
+        func: hack_util_faviconExtractor
       },
       {
         name: "Cookie Viewer",
