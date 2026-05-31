@@ -200,7 +200,18 @@ function hack_fun_showIframeUrls() {
 
     box.addEventListener('click', function(e) {
       e.stopPropagation();
-      navigator.clipboard.writeText(url).then(function() {
+      var fallback = function() {
+        var ta = document.createElement('textarea');
+        ta.value = url;
+        ta.style.cssText = 'position:fixed;opacity:0;';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      };
+      (navigator.clipboard && navigator.clipboard.writeText
+        ? navigator.clipboard.writeText(url).catch(function() { fallback(); })
+        : fallback()).then(function() {
         copyHint.textContent = 'copied!';
         copyHint.style.color = '#51cf66';
         box.style.animation = 'none';
@@ -407,7 +418,18 @@ function hack_iframe_extractAll() {
     urls.push((i + 1) + '. ' + (f.src || f.getAttribute('src') || '(no src)'));
   });
   var text = urls.join('\n');
-  navigator.clipboard.writeText(text).then(function() {
+  var doWrite = function(t) {
+    var ta = document.createElement('textarea');
+    ta.value = t;
+    ta.style.cssText = 'position:fixed;opacity:0;';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+  };
+  (navigator.clipboard && navigator.clipboard.writeText
+    ? navigator.clipboard.writeText(text).then(function() { doWrite = function() {}; }).catch(function() { doWrite(text); })
+    : doWrite(text)).then(function() {
     alert('Found ' + iframes.length + ' iframe(s). URLs copied to clipboard!\n\n' + text);
   }).catch(function() {
     alert('Found ' + iframes.length + ' iframe(s):\n\n' + text);
@@ -537,7 +559,20 @@ function hack_games_extractGameUrl() {
   if (!gameUrls.length && !canvasGames.length && !embedGames.length) {
     result += 'No game elements detected.';
   } else if (gameUrls.length) {
-    navigator.clipboard.writeText(gameUrls[0]);
+    var fallback = function() {
+      var ta = document.createElement('textarea');
+      ta.value = gameUrls[0];
+      ta.style.cssText = 'position:fixed;opacity:0;';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(gameUrls[0]).catch(function() { fallback(); });
+    } else {
+      fallback();
+    }
     result += '\nFirst game URL copied to clipboard!';
   }
   alert(result);
@@ -716,7 +751,18 @@ function hack_util_qrCode() {
 
 function hack_util_copySource() {
   var html = document.documentElement.outerHTML;
-  navigator.clipboard.writeText(html).then(function() {
+  var fallback = function() {
+    var ta = document.createElement('textarea');
+    ta.value = html;
+    ta.style.cssText = 'position:fixed;opacity:0;';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+  };
+  (navigator.clipboard && navigator.clipboard.writeText
+    ? navigator.clipboard.writeText(html).catch(function() { fallback(); })
+    : fallback()).then(function() {
     alert('Full page source copied to clipboard! (' + html.length.toLocaleString() + ' characters)');
   }).catch(function() {
     alert('Failed to copy. Source length: ' + html.length.toLocaleString() + ' chars.');
@@ -744,6 +790,15 @@ function hack_util_listResources() {
     text += '\n';
   });
   navigator.clipboard.writeText(text).then(function() {
+    alert('Resource list copied to clipboard!\n\n' + resources.length + ' resources found.');
+  }).catch(function() {
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.cssText = 'position:fixed;opacity:0;';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
     alert('Resource list copied to clipboard!\n\n' + resources.length + ' resources found.');
   });
 }
@@ -1045,7 +1100,14 @@ function hack_util_cookieViewer() {
   navigator.clipboard.writeText(text).then(function() {
     alert(text + '\nCopied to clipboard!');
   }).catch(function() {
-    alert(text);
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.cssText = 'position:fixed;opacity:0;';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    alert(text + '\nCopied to clipboard!');
   });
 }
 
